@@ -56,6 +56,7 @@ set -u
 
 ProgressLog="/var/log/user-data-progress.log"
 TotalBarWidth=24
+RefreshSeconds=0.5
 
 if [ ! -f "$ProgressLog" ]; then
   echo "Progress log not found: $ProgressLog"
@@ -78,6 +79,8 @@ else
   C_YELLOW=""
   C_GREEN=""
 fi
+
+Cols=$(tput cols 2>/dev/null || echo 120)
 
 DrawBar() {
   local Percent="$1"
@@ -105,7 +108,6 @@ GetLatestPercent() {
 }
 
 GetLatestStepNumbers() {
-  # Outputs: "<CurrentStep> <TotalSteps>" or "0 0"
   local line
   line="$(GetLatestStepLine)"
   if [ -n "$line" ]; then
@@ -119,6 +121,28 @@ GetLatestLabel() {
   awk '/STEP [0-9]+ of [0-9]+  \[[0-9]+%\]/{getline; print}' "$ProgressLog" 2>/dev/null | tail -n 1 || true
 }
 
+RenderLine() {
+  local Percent="$1"
+  local StepNow="$2"
+  local StepTotal="$3"
+  local Label="$4"
+  local Frame="$5"
+
+  local Bar StepText Text
+  Bar="$(DrawBar "$Percent")"
+
+  if [ "${StepTotal:-0}" -gt 0 ]; then
+    StepText="${C_GREEN}STEP ${StepNow}/${StepTotal}${C_RESET}"
+  else
+    StepText=""
+  fi
+
+  Text="${C_BOLD}Deploying${C_RESET} ${Bar}  ${StepText}  ${C_YELLOW}${Label}${C_RESET}  ${Frame}"
+
+  # Print one line, padded to terminal width to fully overwrite previous content (no blinking)
+  printf "\r%-*s" "$Cols" "$Text"
+}
+
 echo ""
 echo "${C_BOLD}Watching EC2 user-data progress${C_RESET} (Ctrl+C to stop)"
 echo ""
@@ -126,10 +150,8 @@ echo ""
 tail -n 20 "$ProgressLog" 2>/dev/null || true
 
 LastLineCount=$(wc -l < "$ProgressLog" 2>/dev/null || echo 0)
-
 TargetPercent="$(GetLatestPercent)"
 ShownPercent="$TargetPercent"
-
 read -r StepNow StepTotal <<<"$(GetLatestStepNumbers)"
 CurrentLabel="$(GetLatestLabel)"
 [ -z "${CurrentLabel:-}" ] && CurrentLabel="Starting..."
@@ -139,6 +161,15 @@ frames='|/-\'
 
 while true; do
   CurrentLineCount=$(wc -l < "$ProgressLog" 2>/dev/null || echo "$LastLineCount")
+
+  # Print any newly appended lines
+  if [ "$CurrentLineCount" -gt "$LastLineCount" ]; then
+    # Move off the dashboard line cleanly
+    printf "\r%-*s\n" "$Cols" " "
+
+    sed -n "$((LastLineCount+1)),$CurrentLineCount"p "$ProgressLog" 2>/dev/null || true
+    LastLineCount="$CurrentLineCount"
+  fi
 
   # Update targets from log
   NewTarget="$(GetLatestPercent)"
@@ -151,14 +182,7 @@ while true; do
   NewLabel="$(GetLatestLabel)"
   [ -n "${NewLabel:-}" ] && CurrentLabel="$NewLabel"
 
-  # Print any newly appended lines
-  if [ "$CurrentLineCount" -gt "$LastLineCount" ]; then
-    printf "\r\033[K"
-    sed -n "$((LastLineCount+1)),$CurrentLineCount"p "$ProgressLog" 2>/dev/null || true
-    LastLineCount="$CurrentLineCount"
-  fi
-
-  # Smooth-fill the bar toward the target
+  # Smooth-fill
   if [ "$ShownPercent" -lt "$TargetPercent" ]; then
     ShownPercent=$((ShownPercent+1))
   elif [ "$ShownPercent" -gt "$TargetPercent" ]; then
@@ -167,28 +191,18 @@ while true; do
 
   # Completion check
   if tail -n 50 "$ProgressLog" 2>/dev/null | grep -q "STEP 10 of 10"; then
-    printf "\r\033[K${C_GREEN}${C_BOLD}Deploying${C_RESET} "
-    DrawBar 100
-    printf "  ${C_GREEN}STEP 10/10${C_RESET}\n\n"
-    printf "${C_GREEN}Reached STEP 10 of 10.${C_RESET}\nClosing in 10 seconds...\n"
+    RenderLine 100 10 10 "$CurrentLabel" ""
+    printf "\n\n${C_GREEN}Reached STEP 10 of 10.${C_RESET}\nClosing in 10 seconds...\n"
     sleep 10
     echo "Done."
     exit 0
   fi
 
-  # Render one-line dashboard
   frame="${frames:i%4:1}"
-  printf "\r\033[K${C_BOLD}Deploying${C_RESET} "
-  DrawBar "$ShownPercent"
-
-  if [ "${StepTotal:-0}" -gt 0 ]; then
-    printf "  ${C_GREEN}STEP %s/%s${C_RESET}" "$StepNow" "$StepTotal"
-  fi
-
-  printf "  ${C_YELLOW}%s${C_RESET}  %s" "$CurrentLabel" "$frame"
+  RenderLine "$ShownPercent" "$StepNow" "$StepTotal" "$CurrentLabel" "$frame"
 
   i=$((i+1))
-  sleep 0.15
+  sleep "$RefreshSeconds"
 done
 EOF
 
