@@ -8,7 +8,9 @@ set -euo pipefail
 # I understand that any violation of these standards will have serious repercussions.
 # ----------------------------
 
+# ----------------------------
 # Capture log output so you can troubleshoot if/when needed
+# ----------------------------
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
@@ -17,7 +19,7 @@ export NEEDRESTART_MODE=a
 touch /root/1-script-started
 
 # ----------------------------
-# Progress Logging (clean STEP banners + status lines)
+# Progress Logging (clean STEP banners + status lines only)
 # ----------------------------
 ProgressLog="/var/log/user-data-progress.log"
 touch "$ProgressLog"
@@ -35,22 +37,21 @@ NextStep() {
     echo "=================================================="
     echo "STEP $CurrentStep of $TotalSteps  [$Percent%]"
     echo "$1"
-    echo "Time: $(date)"
     echo "=================================================="
   } | tee -a "$ProgressLog"
 }
 
 LogStatus() {
-  echo "Status: $1  Time: $(date -u '+%H:%M:%S UTC')" | tee -a "$ProgressLog"
+  echo "Status: $1" | tee -a "$ProgressLog"
 }
 
 # ----------------------------
-# SSH Watcher that allows me to monitor, in real time, that my script is running
+# SSH Watcher: smooth ASCII bar + STEP X/10 + label + spinner (no blinking)
 # Usage after SSH: watchud
 # Auto-exits at STEP 10 with 10s countdown
 # ----------------------------
 
-sudo tee /usr/local/bin/watch-userdata-progress > /dev/null <<'EOF'
+cat > /usr/local/bin/watch-userdata-progress <<'EOF'
 #!/bin/bash
 set -u
 
@@ -88,8 +89,16 @@ DrawBar() {
   local Empty=$((TotalBarWidth - Filled))
 
   printf "["
-  if [ "$Filled" -gt 0 ]; then printf "%s" "${C_CYAN}"; printf "%0.s#" $(seq 1 "$Filled"); printf "%s" "${C_RESET}"; fi
-  if [ "$Empty"  -gt 0 ]; then printf "%s" "${C_DIM}";  printf "%0.s-" $(seq 1 "$Empty");  printf "%s" "${C_RESET}"; fi
+  if [ "$Filled" -gt 0 ]; then
+    printf "%s" "${C_CYAN}"
+    printf "%0.s#" $(seq 1 "$Filled")
+    printf "%s" "${C_RESET}"
+  fi
+  if [ "$Empty" -gt 0 ]; then
+    printf "%s" "${C_DIM}"
+    printf "%0.s-" $(seq 1 "$Empty")
+    printf "%s" "${C_RESET}"
+  fi
   printf "] %s%%" "$Percent"
 }
 
@@ -139,7 +148,7 @@ RenderLine() {
 
   Text="${C_BOLD}Deploying${C_RESET} ${Bar}  ${StepText}  ${C_YELLOW}${Label}${C_RESET}  ${Frame}"
 
-  # Print one line, padded to terminal width to fully overwrite previous content (no blinking)
+  # Print one line, padded to terminal width to overwrite previous content (no flicker)
   printf "\r%-*s" "$Cols" "$Text"
 }
 
@@ -147,9 +156,11 @@ echo ""
 echo "${C_BOLD}Watching EC2 user-data progress${C_RESET} (Ctrl+C to stop)"
 echo ""
 
+# Show some context
 tail -n 20 "$ProgressLog" 2>/dev/null || true
 
 LastLineCount=$(wc -l < "$ProgressLog" 2>/dev/null || echo 0)
+
 TargetPercent="$(GetLatestPercent)"
 ShownPercent="$TargetPercent"
 read -r StepNow StepTotal <<<"$(GetLatestStepNumbers)"
@@ -166,7 +177,6 @@ while true; do
   if [ "$CurrentLineCount" -gt "$LastLineCount" ]; then
     # Move off the dashboard line cleanly
     printf "\r%-*s\n" "$Cols" " "
-
     sed -n "$((LastLineCount+1)),$CurrentLineCount"p "$ProgressLog" 2>/dev/null || true
     LastLineCount="$CurrentLineCount"
   fi
@@ -182,7 +192,7 @@ while true; do
   NewLabel="$(GetLatestLabel)"
   [ -n "${NewLabel:-}" ] && CurrentLabel="$NewLabel"
 
-  # Smooth-fill
+  # Smooth-fill toward the target
   if [ "$ShownPercent" -lt "$TargetPercent" ]; then
     ShownPercent=$((ShownPercent+1))
   elif [ "$ShownPercent" -gt "$TargetPercent" ]; then
@@ -206,14 +216,23 @@ while true; do
 done
 EOF
 
-sudo chmod 755 /usr/local/bin/watch-userdata-progress
+chmod 755 /usr/local/bin/watch-userdata-progress
 
 # ----------------------------
-# Convenience alias for ubuntu user
+# Create a real command (not an alias) so it works immediately on every instance
+# ----------------------------
+cat > /usr/local/bin/watchud <<'EOF'
+#!/bin/bash
+exec /usr/local/bin/watch-userdata-progress
+EOF
+chmod 755 /usr/local/bin/watchud
+
+# ----------------------------
+# Optional: also add alias for convenience (harmless if bashrc is not loaded)
 # ----------------------------
 if [ -f /home/ubuntu/.bashrc ] && ! grep -q "alias watchud=" /home/ubuntu/.bashrc 2>/dev/null; then
   echo "" >> /home/ubuntu/.bashrc
-  echo "alias watchud='/usr/local/bin/watch-userdata-progress'" >> /home/ubuntu/.bashrc
+  echo "alias watchud='/usr/local/bin/watchud'" >> /home/ubuntu/.bashrc
 fi
 chown ubuntu:ubuntu /home/ubuntu/.bashrc 2>/dev/null || true
 
