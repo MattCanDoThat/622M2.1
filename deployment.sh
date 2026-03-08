@@ -221,6 +221,7 @@ chmod 755 /usr/local/bin/watch-userdata-progress
 # ----------------------------
 # Create a real command (not an alias) so it works immediately on every instance
 # ----------------------------
+
 cat > /usr/local/bin/watchud <<'EOF'
 #!/bin/bash
 exec /usr/local/bin/watch-userdata-progress
@@ -230,6 +231,7 @@ chmod 755 /usr/local/bin/watchud
 # ----------------------------
 # Optional: also add alias for convenience (harmless if bashrc is not loaded)
 # ----------------------------
+
 if [ -f /home/ubuntu/.bashrc ] && ! grep -q "alias watchud=" /home/ubuntu/.bashrc 2>/dev/null; then
   echo "" >> /home/ubuntu/.bashrc
   echo "alias watchud='/usr/local/bin/watchud'" >> /home/ubuntu/.bashrc
@@ -239,6 +241,7 @@ chown ubuntu:ubuntu /home/ubuntu/.bashrc 2>/dev/null || true
 # ----------------------------
 # System prep
 # ----------------------------
+
 NextStep "System preparation and package updates"
 LogStatus "Updating packages (apt update/upgrade)"
 apt update
@@ -252,6 +255,7 @@ LogStatus "Prerequisites installed"
 # ----------------------------
 # MariaDB install
 # ----------------------------
+
 NextStep "Installing and starting MariaDB"
 LogStatus "Adding MariaDB repo key and sources"
 mkdir -p /etc/apt/keyrings
@@ -279,6 +283,7 @@ touch /root/3-mariadb-installed
 # ----------------------------
 # Verify MariaDB is running
 # ----------------------------
+
 systemctl is-active --quiet mariadb
 if [ $? -ne 0 ]; then
   echo "ERROR: MariaDB did not start"
@@ -290,6 +295,7 @@ LogStatus "MariaDB is running"
 # ----------------------------
 # Create unprivileged Linux user: mbennett
 # ----------------------------
+
 NextStep "Creating unprivileged Linux user"
 LogStatus "Creating Linux user (mbennett)"
 if id "mbennett" &>/dev/null; then
@@ -303,6 +309,7 @@ LogStatus "Linux user step completed"
 # ----------------------------
 # Download + unzip data AS mbennett
 # ----------------------------
+
 NextStep "Downloading and unzipping source data"
 LogStatus "Downloading dataset zip"
 sudo -u "mbennett" wget -O "/home/mbennett/313007119.zip" "https://622.gomillion.org/data/313007119.zip"
@@ -310,6 +317,7 @@ sudo -u "mbennett" wget -O "/home/mbennett/313007119.zip" "https://622.gomillion
 # ----------------------------
 # Verify the zip exists and is non-empty
 # ----------------------------
+
 if [ ! -s "/home/mbennett/313007119.zip" ]; then
   echo "ERROR: Download failed or zip is empty: /home/mbennett/313007119.zip"
   ls -l "/home/mbennett"
@@ -325,6 +333,7 @@ sudo -u "mbennett" ls -l "/home/mbennett"
 # ----------------------------
 # Verify expected CSVs exist
 # ----------------------------
+
 if [ ! -f "/home/mbennett/customers.csv" ] || \
    [ ! -f "/home/mbennett/orders.csv" ] || \
    [ ! -f "/home/mbennett/orderlines.csv" ] || \
@@ -338,6 +347,7 @@ LogStatus "Dataset downloaded and verified"
 # ----------------------------
 # Create MariaDB user and pass: mbennett
 # ----------------------------
+
 NextStep "Creating MariaDB user and granting POS privileges"
 DbPass="MyVoiceIsMyPassport!"
 LogStatus "Creating DB user and granting privileges"
@@ -349,8 +359,9 @@ mariadb -e "FLUSH PRIVILEGES;"
 LogStatus "DB user created and privileges granted"
 
 # ----------------------------
-# Generate FULL etl.sql in /home/mbennett
+# Generate etl.sql in /home/mbennett
 # ----------------------------
+
 NextStep "Generating etl.sql"
 LogStatus "Writing etl.sql to disk"
 
@@ -575,6 +586,7 @@ LogStatus "etl.sql generated"
 # ----------------------------
 # Generate views.sql in /home/mbennett
 # ----------------------------
+
 NextStep "Generating views.sql (view, materialized view, triggers)"
 LogStatus "Writing views.sql to disk"
 
@@ -681,6 +693,7 @@ LogStatus "views.sql generated"
 # ----------------------------
 # Execute etl.sql as mbennett (unprivileged)
 # ----------------------------
+
 NextStep "Executing etl.sql (build + load POS database)"
 LogStatus "Running ETL (this can take a bit)"
 sudo -u "mbennett" mariadb --local-infile=1 -u "mbennett" -p"${DbPass}" < "/home/mbennett/etl.sql"
@@ -692,6 +705,7 @@ LogStatus "ETL completed"
 # ----------------------------
 # Execute views.sql as mbennett (unprivileged)
 # ----------------------------
+
 NextStep "Executing views.sql (create view, MV table + index, triggers)"
 LogStatus "Creating views, MV table, index, and triggers"
 sudo -u "mbennett" mariadb -u "mbennett" -p"${DbPass}" < "/home/mbennett/views.sql"
