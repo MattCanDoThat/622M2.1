@@ -11,6 +11,7 @@ set -euo pipefail
 # ----------------------------
 # Capture log output so you can troubleshoot if/when needed
 # ----------------------------
+
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
@@ -21,6 +22,7 @@ touch /root/1-script-started
 # ----------------------------
 # Progress Logging (clean STEP banners + status lines only)
 # ----------------------------
+
 ProgressLog="/var/log/user-data-progress.log"
 touch "$ProgressLog"
 chmod 644 "$ProgressLog"
